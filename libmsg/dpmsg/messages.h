@@ -64,6 +64,7 @@ typedef enum DP_MessageType {
     DP_MSG_FILTERED = 72,
     DP_MSG_EXTENSION = 73,
     DP_MSG_UNDO_DEPTH = 74,
+    DP_MSG_USER_INFO = 75,
     DP_MSG_UNDO_POINT = 128,
     DP_MSG_CANVAS_RESIZE = 129,
     DP_MSG_LAYER_CREATE = 130,
@@ -814,6 +815,37 @@ DP_Message *DP_msg_undo_depth_parse(unsigned int context_id,
 DP_MsgUndoDepth *DP_msg_undo_depth_cast(DP_Message *msg);
 
 uint8_t DP_msg_undo_depth_depth(const DP_MsgUndoDepth *mud);
+
+
+/*
+ * DP_MSG_USER_INFO
+ *
+ * Send and receive structured user information. Should probably be
+ * a server meta message so that it can be directed at the appropriate
+ * user, but that's something for Drawpile 3.0.
+ */
+
+#define DP_MSG_USER_INFO_STATIC_LENGTH 1
+
+typedef struct DP_MsgUserInfo DP_MsgUserInfo;
+
+DP_Message *DP_msg_user_info_new(unsigned int context_id, uint8_t recipient,
+                                 const char *msg_value, size_t msg_len);
+
+DP_Message *DP_msg_user_info_deserialize(unsigned int context_id,
+                                         const unsigned char *buffer,
+                                         size_t length);
+
+DP_Message *DP_msg_user_info_parse(unsigned int context_id,
+                                   DP_TextReader *reader);
+
+DP_MsgUserInfo *DP_msg_user_info_cast(DP_Message *msg);
+
+uint8_t DP_msg_user_info_recipient(const DP_MsgUserInfo *mui);
+
+const char *DP_msg_user_info_msg(const DP_MsgUserInfo *mui, size_t *out_len);
+
+size_t DP_msg_user_info_msg_len(const DP_MsgUserInfo *mui);
 
 
 /*

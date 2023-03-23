@@ -72,6 +72,7 @@ bool DP_message_type_client_meta(DP_MessageType type)
     case DP_MSG_FILTERED:
     case DP_MSG_EXTENSION:
     case DP_MSG_UNDO_DEPTH:
+    case DP_MSG_USER_INFO:
         return true;
     default:
         return false;
@@ -164,6 +165,8 @@ const char *DP_message_type_name(DP_MessageType type)
         return "extension";
     case DP_MSG_UNDO_DEPTH:
         return "undodepth";
+    case DP_MSG_USER_INFO:
+        return "userinfo";
     case DP_MSG_UNDO_POINT:
         return "undopoint";
     case DP_MSG_CANVAS_RESIZE:
@@ -276,6 +279,8 @@ const char *DP_message_type_enum_name(DP_MessageType type)
         return "DP_MSG_EXTENSION";
     case DP_MSG_UNDO_DEPTH:
         return "DP_MSG_UNDO_DEPTH";
+    case DP_MSG_USER_INFO:
+        return "DP_MSG_USER_INFO";
     case DP_MSG_UNDO_POINT:
         return "DP_MSG_UNDO_POINT";
     case DP_MSG_CANVAS_RESIZE:
@@ -408,6 +413,9 @@ DP_MessageType DP_message_type_from_name(const char *type_name,
     }
     else if (DP_str_equal(type_name, "undodepth")) {
         return DP_MSG_UNDO_DEPTH;
+    }
+    else if (DP_str_equal(type_name, "userinfo")) {
+        return DP_MSG_USER_INFO;
     }
     else if (DP_str_equal(type_name, "undopoint")) {
         return DP_MSG_UNDO_POINT;
@@ -565,6 +573,8 @@ DP_Message *DP_message_deserialize_body(int type, unsigned int context_id,
         return NULL;
     case DP_MSG_UNDO_DEPTH:
         return DP_msg_undo_depth_deserialize(context_id, buf, length);
+    case DP_MSG_USER_INFO:
+        return DP_msg_user_info_deserialize(context_id, buf, length);
     case DP_MSG_UNDO_POINT:
         return DP_msg_undo_point_deserialize(context_id, buf, length);
     case DP_MSG_CANVAS_RESIZE:
@@ -687,6 +697,8 @@ DP_Message *DP_message_parse_body(DP_MessageType type, unsigned int context_id,
         return NULL;
     case DP_MSG_UNDO_DEPTH:
         return DP_msg_undo_depth_parse(context_id, reader);
+    case DP_MSG_USER_INFO:
+        return DP_msg_user_info_parse(context_id, reader);
     case DP_MSG_UNDO_POINT:
         return DP_msg_undo_point_parse(context_id, reader);
     case DP_MSG_CANVAS_RESIZE:
@@ -3014,6 +3026,123 @@ uint8_t DP_msg_undo_depth_depth(const DP_MsgUndoDepth *mud)
 {
     DP_ASSERT(mud);
     return mud->depth;
+}
+
+
+/* DP_MSG_USER_INFO */
+
+struct DP_MsgUserInfo {
+    uint8_t recipient;
+    uint16_t msg_len;
+    char msg[];
+};
+
+static size_t msg_user_info_payload_length(DP_Message *msg)
+{
+    DP_MsgUserInfo *mui = DP_message_internal(msg);
+    return ((size_t)1) + DP_uint16_to_size(mui->msg_len);
+}
+
+static size_t msg_user_info_serialize_payload(DP_Message *msg,
+                                              unsigned char *data)
+{
+    DP_MsgUserInfo *mui = DP_message_internal(msg);
+    size_t written = 0;
+    written += DP_write_bigendian_uint8(mui->recipient, data + written);
+    written += DP_write_bytes(mui->msg, 1, mui->msg_len, data + written);
+    DP_ASSERT(written == msg_user_info_payload_length(msg));
+    return written;
+}
+
+static bool msg_user_info_write_payload_text(DP_Message *msg,
+                                             DP_TextWriter *writer)
+{
+    DP_MsgUserInfo *mui = DP_message_internal(msg);
+    return DP_text_writer_write_string(writer, "msg", mui->msg)
+        && DP_text_writer_write_uint(writer, "recipient", mui->recipient,
+                                     false);
+}
+
+static bool msg_user_info_equals(DP_Message *DP_RESTRICT msg,
+                                 DP_Message *DP_RESTRICT other)
+{
+    DP_MsgUserInfo *a = DP_message_internal(msg);
+    DP_MsgUserInfo *b = DP_message_internal(other);
+    return a->recipient == b->recipient && a->msg_len == b->msg_len
+        && memcmp(a->msg, b->msg, a->msg_len) == 0;
+}
+
+static const DP_MessageMethods msg_user_info_methods = {
+    msg_user_info_payload_length,
+    msg_user_info_serialize_payload,
+    msg_user_info_write_payload_text,
+    msg_user_info_equals,
+};
+
+DP_Message *DP_msg_user_info_new(unsigned int context_id, uint8_t recipient,
+                                 const char *msg_value, size_t msg_len)
+{
+    DP_Message *msg =
+        DP_message_new(DP_MSG_USER_INFO, context_id, &msg_user_info_methods,
+                       DP_FLEX_SIZEOF(DP_MsgUserInfo, msg, msg_len + 1));
+    DP_MsgUserInfo *mui = DP_message_internal(msg);
+    mui->recipient = recipient;
+    mui->msg_len = DP_size_to_uint16(msg_len);
+    assign_string(mui->msg, msg_value, mui->msg_len);
+    return msg;
+}
+
+DP_Message *DP_msg_user_info_deserialize(unsigned int context_id,
+                                         const unsigned char *buffer,
+                                         size_t length)
+{
+    if (length < 1 || length > 65535) {
+        DP_error_set("Wrong length for userinfo message; "
+                     "expected between 1 and 65535, got %zu",
+                     length);
+        return NULL;
+    }
+    size_t read = 0;
+    uint8_t recipient = read_uint8(buffer + read, &read);
+    size_t msg_bytes = length - read;
+    uint16_t msg_len = DP_size_to_uint16(msg_bytes);
+    const char *msg = (const char *)buffer + read;
+    return DP_msg_user_info_new(context_id, recipient, msg, msg_len);
+}
+
+DP_Message *DP_msg_user_info_parse(unsigned int context_id,
+                                   DP_TextReader *reader)
+{
+    uint8_t recipient =
+        (uint8_t)DP_text_reader_get_ulong(reader, "recipient", UINT8_MAX);
+    uint16_t msg_len;
+    const char *msg = DP_text_reader_get_string(reader, "msg", &msg_len);
+    return DP_msg_user_info_new(context_id, recipient, msg, msg_len);
+}
+
+DP_MsgUserInfo *DP_msg_user_info_cast(DP_Message *msg)
+{
+    return DP_message_cast(msg, DP_MSG_USER_INFO);
+}
+
+uint8_t DP_msg_user_info_recipient(const DP_MsgUserInfo *mui)
+{
+    DP_ASSERT(mui);
+    return mui->recipient;
+}
+
+const char *DP_msg_user_info_msg(const DP_MsgUserInfo *mui, size_t *out_len)
+{
+    DP_ASSERT(mui);
+    if (out_len) {
+        *out_len = mui->msg_len;
+    }
+    return mui->msg;
+}
+
+size_t DP_msg_user_info_msg_len(const DP_MsgUserInfo *mui)
+{
+    return mui->msg_len;
 }
 
 
